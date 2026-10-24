@@ -1,5 +1,3 @@
-# 1. Overwrite README.md with the professional content
-Set-Content -Path "README.md" -Value @"
 <div align="center">
 
 # 🚗 DriveSync
@@ -46,7 +44,7 @@ Set-Content -Path "README.md" -Value @"
 
 ## 📁 Project Layout
 
-\`\`\`text
+```text
 DBMS_Micro_Project/
 ├── backend/
 │   ├── app/
@@ -76,16 +74,19 @@ DBMS_Micro_Project/
 ├── sql/
 ├── .env.example
 └── README.md
-\`\`\`
+
+```
 
 ---
 
 ## ⚙️ Configuration & Environment Setup
 
 1. **Clone or navigate** to the project root directory.
-2. **Configure Environment Variables:** Create a root-level \`.env\` file referencing \`.env.example\` as a template[cite: 1].
+2. **Configure Environment Variables:** Create a root-level `.env` file referencing `.env.example` as a template.
 
-\`\`\`env
+
+
+```env
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=vehicle_rental_db
@@ -94,51 +95,119 @@ DB_PASSWORD=your_secure_local_password
 
 API_HOST=127.0.0.1
 API_PORT=8000
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-\`\`\`
+CORS_ORIGINS=http://localhost:5173,[http://127.0.0.1:5173](http://127.0.0.1:5173)
+
+```
 
 ---
 
 ## 🏃 Running Locally (Windows PowerShell)
 
 ### Step 1: Initialize and Start the Backend API
-\`\`\`powershell
-python -m venv backend\\.venv
-.\\backend\\.venv\\Scripts\\Activate.ps1
-python -m pip install -r backend\\requirements.txt
+
+```powershell
+python -m venv backend\.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend\requirements.txt
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
-\`\`\`
+
+```
 
 ### Step 2: Start the Frontend Application (New Terminal)
-\`\`\`powershell
-Set-Location .\\frontend
+
+```powershell
+Set-Location .\frontend
 npm install
 npm run dev
-\`\`\`
+
+```
 
 ---
 
-## 🔗 Quick Reference URLs
-
 | Resource | Path / URL |
 | :--- | :--- |
-| **Frontend User Interface** | \`http://localhost:5173\`[cite: 1] |
-| **API Health Check** | \`http://127.0.0.1:8000/health\`[cite: 1] |
-| **Interactive API Docs (Swagger)** | \`http://127.0.0.1:8000/docs\`[cite: 1] |
-| **OpenAPI Schema Definition** | \`http://127.0.0.1:8000/openapi.json\`[cite: 1] |
+| **Frontend User Interface** | `http://localhost:5173` |
+| **API Health Check** | `http://127.0.0.1:8000/health` |
+| **Interactive API Docs (Swagger)** | `http://127.0.0.1:8000/docs` |
+| **OpenAPI Schema Definition** | `http://127.0.0.1:8000/openapi.json` |
 
 ---
 
 ## 🔌 REST API Overview
 
-All core business route endpoints are versioned under \`/api/v1\`[cite: 1]:
-* **Dashboard:** \`GET /api/v1/dashboard/stats\`[cite: 1]
-* **Vehicles:** \`GET/POST /api/v1/vehicles\`, \`GET/PUT/DELETE /api/v1/vehicles/{id}\`, \`PATCH /api/v1/vehicles/{id}/status\`, \`GET /api/v1/vehicles/categories\`[cite: 1]
-* **Customers:** \`GET/POST /api/v1/customers\`, \`GET/PUT/DELETE /api/v1/customers/{id}\`, \`PATCH /api/v1/customers/{id}/verify\`[cite: 1]
-* **Bookings:** \`GET/POST /api/v1/bookings\`, \`GET /api/v1/bookings/{id}\`, \`PATCH /api/v1/bookings/{id}/status\`, \`POST /api/v1/bookings/{id}/cancel\`, \`GET /api/v1/bookings/{id}/history\`[cite: 1]
-* **Payments:** \`GET/POST /api/v1/payments\`[cite: 1]
-* **Returns:** \`GET/POST /api/v1/returns\`, \`GET /api/v1/returns/{booking_id}\`[cite: 1]
-* **Maintenance:** \`GET/POST /api/v1/maintenance\`, \`PATCH /api/v1/maintenance/{id}\`[cite: 1]
-* **Reports:** \`GET /api/v1/reports/monthly-revenue\`, \`/popular-vehicles\`, \`/customer-history\`, \`/outstanding-payments\`, \`/vehicle-utilization\`[cite: 1]
+All core business route endpoints are versioned under `/api/v1`:
+
+* **Dashboard:** `GET /api/v1/dashboard/stats`
+
+
+* **Vehicles:** `GET/POST /api/v1/vehicles`, `GET/PUT/DELETE /api/v1/vehicles/{id}`, `PATCH /api/v1/vehicles/{id}/status`, `GET /api/v1/vehicles/categories`
+
+
+* **Customers:** `GET/POST /api/v1/customers`, `GET/PUT/DELETE /api/v1/customers/{id}`, `PATCH /api/v1/customers/{id}/verify`
+
+
+* **Bookings:** `GET/POST /api/v1/bookings`, `GET /api/v1/bookings/{id}`, `PATCH /api/v1/bookings/{id}/status`, `POST /api/v1/bookings/{id}/cancel`, `GET /api/v1/bookings/{id}/history`
+
+
+* **Payments:** `GET/POST /api/v1/payments`
+
+
+* **Returns:** `GET/POST /api/v1/returns`, `GET /api/v1/returns/{booking_id}`
+
+
+* **Maintenance:** `GET/POST /api/v1/maintenance`, `PATCH /api/v1/maintenance/{id}`
+
+
+* **Reports:** `GET /api/v1/reports/monthly-revenue`, `/popular-vehicles`, `/customer-history`, `/outstanding-payments`, `/vehicle-utilization`
+
+
 
 ---
+
+Here is just the final section for your `README.md`, perfectly formatted in one go:
+
+```markdown
+---
+
+## 🧪 Testing & Code Quality
+
+### Run Backend Integration Tests
+```powershell
+$env:PYTHONPATH = "."
+& ".\backend\.venv\Scripts\pytest.exe" backend\tests -v
+
+```
+
+### Run Frontend Build & Linter Checks
+
+```powershell
+npm run lint
+npm run build
+
+```
+
+---
+
+## 📚 Related Documentation
+
+* [`sql/01_existing_schema_documentation.sql`](https://www.google.com/search?q=./sql/01_existing_schema_documentation.sql) — existing schema reference[cite: 1].
+* [`sql/02_additional_views.sql`](https://www.google.com/search?q=./sql/02_additional_views.sql) — supplementary reporting-view definitions[cite: 1].
+
+```
+
+---
+
+<ElicitationsGroup>
+</ElicitationsGroup>
+
+<FollowUp>
+Does this complete the final piece of your README file?
+</FollowUp>
+
+```
+
+```
+
+---
+
+```
