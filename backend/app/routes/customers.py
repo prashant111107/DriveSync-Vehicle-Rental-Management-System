@@ -97,6 +97,8 @@ def update_customer(
     data = payload.model_dump(exclude_unset=True)
     if not data:
         return get_customer(customer_id, conn)
+    if any(value is None for value in data.values()):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Update fields cannot be null.")
 
     normalized = {
         "full_name": data.get("full_name", "").strip() if "full_name" in data else None,
@@ -104,6 +106,8 @@ def update_customer(
         "phone": data.get("phone", "").strip() if "phone" in data else None,
         "licence_number": data.get("licence_number", "").strip().upper() if "licence_number" in data else None,
     }
+    if any(not value for value in normalized.values() if value is not None):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Update fields cannot be blank.")
     updates = [f"{field} = %s" for field in normalized if field in data]
     params = [normalized[field] for field in normalized if field in data]
     params.append(customer_id)
@@ -111,6 +115,19 @@ def update_customer(
     try:
         with conn.transaction():
             with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT licence_number FROM customers WHERE customer_id = %s FOR UPDATE;",
+                    (customer_id,),
+                )
+                current = cur.fetchone()
+                if not current:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Customer {customer_id} not found.",
+                    )
+
+                if "licence_number" in data and normalized["licence_number"] != current["licence_number"]:
+                    updates.append("licence_verified = FALSE")
                 cur.execute(
                     f"""
                         UPDATE customers
@@ -162,16 +179,15 @@ def verify_customer_licence(
     payload: CustomerVerifyUpdate,
     conn: psycopg.Connection = Depends(get_db),
 ):
-    with conn.cursor() as cur:
-        cur.execute("""
-            UPDATE customers
-            SET licence_verified = %s
-            WHERE customer_id = %s
-            RETURNING customer_id, full_name, email, phone, licence_number, licence_verified, created_at;
-        """, (payload.licence_verified, customer_id))
-        updated = cur.fetchone()
-        if not updated:
-            conn.rollback()
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer {customer_id} not found")
-        conn.commit()
-        return updated
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE customers
+                SET licence_verified = %s
+                WHERE customer_id = %s
+                RETURNING customer_id, full_name, email, phone, licence_number, licence_verified, created_at;
+            """, (payload.licence_verified, customer_id))
+            updated = cur.fetchone()
+            if not updated:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer {customer_id} not found")
+            return updated

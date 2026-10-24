@@ -1,4 +1,5 @@
 import math
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List
 import psycopg
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/v1/bookings", tags=["Bookings"])
 VALID_TRANSITIONS = {
     "PENDING": ["CONFIRMED", "CANCELLED"],
     "CONFIRMED": ["ACTIVE", "CANCELLED"],
-    "ACTIVE": ["COMPLETED"],
+    "ACTIVE": [],
     "COMPLETED": [],
     "CANCELLED": [],
 }
@@ -165,7 +166,7 @@ def create_booking(payload: BookingCreate, conn: psycopg.Connection = Depends(ge
                     )
 
                 # 3. Calculate consistent duration and total amount
-                days, total_amount = calculate_duration_and_price(payload.pickup_at, payload.return_at, veh["daily_rate"])
+                _, total_amount = calculate_duration_and_price(payload.pickup_at, payload.return_at, veh["daily_rate"])
 
                 # 4. Insert booking with initial status PENDING
                 insert_query = """
@@ -248,6 +249,23 @@ def update_booking_status(
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Cannot accept or confirm booking: Customer's driving licence has not been verified yet. An administrator must verify the licence first.",
+                        )
+                if target_status == "ACTIVE":
+                    now = datetime.now(timezone.utc)
+                    if current["pickup_at"] > now or current["return_at"] <= now:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="The booking is outside its scheduled rental period and cannot be handed over.",
+                        )
+                    cur.execute(
+                        "SELECT status FROM vehicles WHERE vehicle_id = %s FOR UPDATE;",
+                        (current["vehicle_id"],),
+                    )
+                    vehicle = cur.fetchone()
+                    if vehicle["status"] != "AVAILABLE":
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="The vehicle is not available for handover.",
                         )
 
                 # Perform status update (PostgreSQL trigger will log to booking_status_history)

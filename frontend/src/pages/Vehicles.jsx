@@ -5,6 +5,7 @@ import {
   Filter,
   Plus,
   Edit2,
+  Trash2,
   CheckCircle2,
   Wrench,
   PowerOff,
@@ -113,10 +114,12 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
 
   const handleUpdateVehicle = async (e) => {
     e.preventDefault();
+    if (!editVehicle) return;
     try {
       setSubmitting(true);
       await api.updateVehicle(editVehicle.vehicle_id, {
         category_id: parseInt(editVehicle.category_id, 10),
+        registration_no: editVehicle.registration_no,
         brand: editVehicle.brand,
         model: editVehicle.model,
         manufacture_year: parseInt(editVehicle.manufacture_year, 10),
@@ -140,6 +143,18 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
     try {
       await api.updateVehicleStatus(vehicleId, newStatus);
       addToast(`Vehicle status changed to ${newStatus}`, 'success');
+      fetchData();
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  };
+
+  const handleDeleteVehicle = async (vehicle) => {
+    if (!window.confirm(`Delete ${vehicle.brand} ${vehicle.model} (${vehicle.registration_no})? Vehicles with booking or maintenance history cannot be deleted.`)) return;
+    try {
+      await api.deleteVehicle(vehicle.vehicle_id);
+      addToast('Vehicle deleted successfully.', 'success');
+      setEditVehicle(null);
       fetchData();
     } catch (err) {
       addToast(err.message, 'error');
@@ -483,7 +498,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
         <Modal
           isOpen={Boolean(editVehicle)}
           onClose={() => setEditVehicle(null)}
-          title={`Edit ${editVehicle.brand} ${editVehicle.model}`}
+          title={`Edit ${editVehicle?.brand || ''} ${editVehicle?.model || ''}`}
         >
           <form onSubmit={handleUpdateVehicle}>
             <div className="modal-body">
@@ -493,7 +508,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                   <input
                     type="text"
                     className="form-control"
-                    value={editVehicle.brand}
+                    value={editVehicle?.brand || ''}
                     onChange={(e) => setEditVehicle({ ...editVehicle, brand: e.target.value })}
                     required
                   />
@@ -503,7 +518,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                   <input
                     type="text"
                     className="form-control"
-                    value={editVehicle.model}
+                    value={editVehicle?.model || ''}
                     onChange={(e) => setEditVehicle({ ...editVehicle, model: e.target.value })}
                     required
                   />
@@ -517,7 +532,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={editVehicle.daily_rate}
+                    value={editVehicle?.daily_rate || ''}
                     onChange={(e) => setEditVehicle({ ...editVehicle, daily_rate: e.target.value })}
                     required
                   />
@@ -526,7 +541,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                   <label className="form-label">Status</label>
                   <select
                     className="form-control"
-                    value={editVehicle.status}
+                    value={editVehicle?.status || 'AVAILABLE'}
                     onChange={(e) => setEditVehicle({ ...editVehicle, status: e.target.value })}
                   >
                     <option value="AVAILABLE">Available</option>
@@ -541,7 +556,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                   <label className="form-label">Transmission</label>
                   <select
                     className="form-control"
-                    value={editVehicle.transmission}
+                    value={editVehicle?.transmission || 'AUTOMATIC'}
                     onChange={(e) => setEditVehicle({ ...editVehicle, transmission: e.target.value })}
                   >
                     <option value="MANUAL">Manual</option>
@@ -552,7 +567,7 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
                   <label className="form-label">Fuel Type</label>
                   <select
                     className="form-control"
-                    value={editVehicle.fuel_type}
+                    value={editVehicle?.fuel_type || 'PETROL'}
                     onChange={(e) => setEditVehicle({ ...editVehicle, fuel_type: e.target.value })}
                   >
                     <option value="PETROL">Petrol</option>
@@ -567,6 +582,13 @@ export const Vehicles = ({ refreshKey, isAddModalOpen, setIsAddModalOpen, onBook
             <div className="modal-footer">
               <button type="button" onClick={() => setEditVehicle(null)} className="btn btn-secondary">
                 Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteVehicle(editVehicle)}
+                className="btn btn-danger"
+              >
+                <Trash2 size={14} /> Delete
               </button>
               <button type="submit" disabled={submitting} className="btn btn-primary">
                 {submitting ? <span className="spinner" /> : <span>Save Changes</span>}

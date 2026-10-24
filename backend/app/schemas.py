@@ -33,6 +33,7 @@ class VehicleCreate(VehicleBase):
 
 class VehicleUpdate(BaseModel):
     category_id: Optional[int] = None
+    registration_no: Optional[str] = Field(None, min_length=1)
     brand: Optional[str] = None
     model: Optional[str] = None
     manufacture_year: Optional[int] = Field(None, ge=1900, le=2100)

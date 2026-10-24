@@ -1,151 +1,195 @@
-# DriveSync — Vehicle Rental Management System (DBMS Micro Project)
+# DriveSync — Vehicle Rental Management System
 
-A full-stack, enterprise-grade Vehicle Rental Management System built on PostgreSQL 18.6, FastAPI (Python with psycopg 3), and React with Vite.
+DriveSync is a full-stack admin application for managing a vehicle rental fleet. It uses React and Vite for the dashboard, FastAPI for business logic and REST APIs, and PostgreSQL for persistent data and database-enforced rules.
 
-Designed for real-world rental operations with robust transactional integrity, exclusion constraints, triggers, and comprehensive analytical reporting.
+> **Database safety:** The application connects to the existing `vehicle_rental_db`. Its tables, data, constraints, indexes, views, and triggers are part of the existing database and should be preserved. Do not reset the database or run scripts that drop or recreate these objects.
 
----
+## Technology
 
-## Architecture & Technology Stack
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, Vite, Lucide React, CSS |
+| Backend | Python, FastAPI, Pydantic, psycopg 3 connection pool |
+| Database | PostgreSQL |
+| API format | REST / JSON |
 
-- **Database**: PostgreSQL 18.6
-  - Connection Driver: `psycopg 3` (`psycopg[binary,pool]`)
-  - Concurrency Control: PostgreSQL GiST Exclusion Constraint `bookings_no_overlapping_active_reservations`
-  - Automated Triggers: `trg_booking_status_history` logging transitions to `booking_status_history`
-  - Views: `available_vehicles`, `booking_details`, `view_monthly_revenue`, `view_popular_vehicles`, `view_outstanding_payments`, `view_vehicle_utilization`
-- **Backend**: Python 3.14+, FastAPI, Pydantic V2, Uvicorn
-- **Frontend**: React 19, Vite, Vanilla CSS (Modern dark/light glassmorphism theme), Lucide Icons
-- **API Standard**: REST & JSON with OpenAPI / Swagger documentation (`/docs`)
+## Features
 
----
+- **Dashboard:** Fleet and booking summaries, revenue totals, customer verification counts, recent bookings, and recent payments. The dashboard API also returns overdue active bookings, pending payment totals/counts, deposits held, and scheduled or in-progress maintenance alerts.
+- **Vehicles:** Search and filter by category, fuel, transmission, rate, and status; add, edit, and delete vehicles; update operational status; start a booking for an available vehicle.
+- **Customers:** Search and filter the customer directory, register, edit, and delete customers, and verify or revoke driving-licence verification.
+- **Bookings:** Create reservations with a server-calculated price, check the licence before confirmation or handover, enforce allowed status transitions, cancel bookings, process vehicle handover, and view database-recorded status history. Completion requires a return inspection.
+- **Payments:** Record ledger entries for rental, deposit, late fee, damage, and refund types with pending, successful, or failed status. Refund requests are checked against captured amounts. Transaction references are unique when provided. This is a payment ledger; no external payment processor is integrated.
+- **Returns:** Record the return time, odometer readings, fuel level, condition notes, and late/damage charges. A return can only be recorded for an active rental. The vehicle is not made available while maintenance is in progress.
+- **Maintenance:** Schedule and update service records; in-progress maintenance marks the vehicle as under maintenance and cannot start during an active rental.
+- **Reports:** Monthly revenue, popular vehicles, customer payment history, outstanding balances, and vehicle utilization, using PostgreSQL views and queries.
+- **API health:** `/health` and `/api/v1/health` report whether the database connection is healthy.
 
-## Database Design & Objects
+### Current API scope
 
-### 1. Existing Tables Inspected & Preserved
-- `vehicle_categories`: Segment taxonomy (`Hatchback`, `SUV`, `Bike`)
-- `vehicles`: Fleet inventory with rates, fuel types, transmission, and operational statuses (`AVAILABLE`, `MAINTENANCE`, `INACTIVE`)
-- `customers`: Customer profiles with driving licence numbers and `licence_verified` status
-- `bookings`: Reservations with temporal intervals (`pickup_at`, `return_at`), rate snapshots, and status state machine
-- `payments`: Financial ledger with payment methods (`UPI`, `CARD`, `CASH`, `BANK_TRANSFER`), transaction references, and statuses
-- `rental_returns`: Vehicle check-in inspections with start/end odometer, fuel levels, damage notes, and late/damage fee assessments
-- `maintenance_records`: Servicing schedule, downtime logs, and maintenance cost accounting
-- `booking_status_history`: Automated status audit trail generated via database trigger `trg_booking_status_history`
+The backend supports customer and vehicle create, read, update, delete, search/filter, and licence verification where applicable. Foreign-key history prevents deleting customers or vehicles that are referenced by bookings or maintenance. Payment records can be entered with supported payment types and statuses, but there is no payment gateway or automated refund processing. Return fees are stored on the return record; recording a return does not itself create payment-ledger transactions. Because the existing payment schema does not link a refund to its original payment, reports treat a refund as a booking-level reversal and cannot identify whether a deposit or rental charge was refunded.
 
-### 2. Constraints & Business Logic
-- **Exclusion Constraint**: `bookings_no_overlapping_active_reservations` prevents concurrent or overlapping active reservations for the same vehicle at the database engine level (`tstzrange(pickup_at, return_at, '[)') WITH &&`).
-- **Row-Level Serialization**: `SELECT ... FOR UPDATE` serializes concurrent booking attempts for the same vehicle.
-- **Driving Licence Enforcement**: Enforces that a customer's driving licence must be verified before a reservation can be accepted or confirmed.
-- **Atomic Transactions**: Booking creation, returns check-in, and payments run inside atomic database transactions (`conn.transaction()`).
+## Existing PostgreSQL schema
 
-### 3. Supplementary Reporting Views
-Defined in [`sql/02_additional_views.sql`](file:///c:/Users/Prashant%20Singh/OneDrive/Desktop/DBMS_Micro_Project/sql/02_additional_views.sql):
-- `view_monthly_revenue`: Monthly breakdown of transaction amounts, types, and methods.
-- `view_popular_vehicles`: Fleet ranking by rental demand, gross booking value, and average rental days.
-- `view_outstanding_payments`: Difference between booking amounts and successful payments.
-- `view_vehicle_utilization`: Total days on road versus service downtime and maintenance costs.
+The application uses these existing public tables:
 
----
+- `vehicle_categories`
+- `vehicles`
+- `customers`
+- `bookings`
+- `booking_status_history`
+- `payments`
+- `rental_returns`
+- `maintenance_records`
 
-## Directory Structure
+Existing database rules include the `bookings_no_overlapping_active_reservations` GiST exclusion constraint, unique customer and vehicle identifiers, unique payment transaction references, and one return record per booking. The `trg_booking_status_history` trigger logs booking status changes.
+
+Existing views include:
+
+- `available_vehicles`
+- `booking_details`
+- `view_monthly_revenue`
+- `view_popular_vehicles`
+- `view_outstanding_payments`
+- `view_vehicle_utilization`
+
+The booking API locks the relevant vehicle row while creating a reservation, calculates the price from the stored daily rate, and translates overlapping-reservation conflicts into an HTTP 409 response. PostgreSQL remains the final authority for preventing overlapping active reservations.
+
+No database reset is required to run the application. The SQL files under `sql/` document existing database objects and supplementary reporting views; inspect the live database before applying any SQL changes.
+
+## Project layout
 
 ```text
 DBMS_Micro_Project/
 ├── backend/
 │   ├── app/
-│   │   ├── config.py              # Environment configuration
-│   │   ├── database.py            # psycopg 3 connection pool & health checks
-│   │   ├── main.py                # FastAPI app with CORS & lifespan
-│   │   ├── schemas.py             # Pydantic validation schemas
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   ├── main.py
+│   │   ├── schemas.py
 │   │   └── routes/
-│   │       ├── dashboard.py       # Executive overview metrics
-│   │       ├── vehicles.py        # Fleet management & filters
-│   │       ├── customers.py       # Customer directory & licence verification
-│   │       ├── bookings.py        # Reservation lifecycle & exclusion checks
-│   │       ├── payments.py        # Payment recording & ledger
-│   │       ├── returns.py         # Odometer/fuel check-in & fee calculations
-│   │       ├── maintenance.py     # Fleet servicing & downtime
-│   │       └── reports.py         # Analytics & reporting endpoints
-│   ├── tests/
-│   │   └── test_api.py            # Comprehensive test suite
-│   ├── requirements.txt
-│   └── .venv/                     # Python virtual environment
+│   │       ├── bookings.py
+│   │       ├── customers.py
+│   │       ├── dashboard.py
+│   │       ├── maintenance.py
+│   │       ├── payments.py
+│   │       ├── reports.py
+│   │       ├── returns.py
+│   │       └── vehicles.py
+│   ├── tests/test_api.py
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── components/            # Sidebar, Navbar, Modal, Toast
-│   │   ├── pages/                 # Dashboard, Vehicles, Bookings, Customers, ReturnsPayments, Maintenance, Reports
-│   │   ├── services/api.js        # REST API client
-│   │   ├── App.jsx                # Master coordinator
-│   │   └── index.css              # Custom responsive design system
-│   ├── index.html
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/api.js
+│   │   └── App.jsx
 │   ├── package.json
 │   └── vite.config.js
 ├── sql/
-│   ├── 01_existing_schema_documentation.sql
-│   └── 02_additional_views.sql
-├── .env                           # Local PostgreSQL credentials (git-ignored)
-├── .env.example                   # Example credentials template
-├── .gitignore
+├── .env.example
 └── README.md
 ```
 
----
+## Requirements
 
-## Setup & Running Instructions
+- Python 3.14 or a compatible Python version
+- Node.js and npm
+- PostgreSQL with the existing `vehicle_rental_db` database and required schema
 
-### 1. Environment Configuration
-Create or verify `.env` in the project root:
+## Configuration
+
+Create a root-level `.env` file using `.env.example` as a template. The backend also checks `backend\.env` as a fallback. Set the credentials for the existing `vehicle_rental_db`; never commit the real `.env` file. If `DATABASE_URL` is used for credentials/host, `DB_NAME` still selects the database name (default: `vehicle_rental_db`).
+
 ```env
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=vehicle_rental_db
 DB_USER=postgres
-DB_PASSWORD=your_password_here
+DB_PASSWORD=replace_with_your_local_password
+
 API_HOST=127.0.0.1
 API_PORT=8000
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-### 2. Backend Setup & Run
+The Vite development server proxies `/api` and `/health` requests to `http://127.0.0.1:8000`. If port 5173 is already in use, Vite may select another port; use the URL printed by Vite. The proxy configuration works independently of the frontend port.
 
-Open PowerShell in the project directory:
+## Run locally (Windows PowerShell)
+
+Open a terminal at the project root.
+
+### 1. Start the API
+
 ```powershell
-# 1. Activate virtual environment
 .\backend\.venv\Scripts\Activate.ps1
-
-# 2. Run backend API server
 python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
-- API will be accessible at: `http://127.0.0.1:8000`
-- Interactive Swagger API docs: `http://127.0.0.1:8000/docs`
-- Health check: `http://127.0.0.1:8000/health`
 
-### 3. Frontend Setup & Run
+If a local virtual environment has not been created yet:
 
-In a second PowerShell terminal:
 ```powershell
-# Navigate to frontend and start dev server
-cd frontend
+python -m venv backend\.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend\requirements.txt
+python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 2. Start the frontend
+
+In a second terminal:
+
+```powershell
+Set-Location .\frontend
+npm install
 npm run dev
 ```
-- Web dashboard will be accessible at: `http://localhost:5173`
 
----
+Open the local URL printed by Vite (normally `http://localhost:5173`).
 
-## Running Automated Tests
+### Useful URLs
 
-Run the full validation test suite covering booking conflicts, unverified licences, invalid dates, payments, returns, and reports:
+| Purpose | URL |
+| --- | --- |
+| Frontend | `http://localhost:5173` |
+| API health | `http://127.0.0.1:8000/health` |
+| Interactive API docs | `http://127.0.0.1:8000/docs` |
+| OpenAPI schema | `http://127.0.0.1:8000/openapi.json` |
+
+## REST API overview
+
+All application routes are versioned under `/api/v1`.
+
+| Area | Main routes |
+| --- | --- |
+| Dashboard | `GET /dashboard/stats` |
+| Vehicles | `GET/POST /vehicles`, `GET/PUT/DELETE /vehicles/{id}`, `PATCH /vehicles/{id}/status`, `GET /vehicles/categories` |
+| Customers | `GET/POST /customers`, `GET/PUT/DELETE /customers/{id}`, `PATCH /customers/{id}/verify` |
+| Bookings | `GET/POST /bookings`, `GET /bookings/{id}`, `PATCH /bookings/{id}/status`, `POST /bookings/{id}/cancel`, `GET /bookings/{id}/history` |
+| Payments | `GET/POST /payments` |
+| Returns | `GET/POST /returns`, `GET /returns/{booking_id}` |
+| Maintenance | `GET/POST /maintenance`, `PATCH /maintenance/{id}` |
+| Reports | `GET /reports/monthly-revenue`, `/popular-vehicles`, `/customer-history`, `/outstanding-payments`, `/vehicle-utilization` |
+
+## Tests and frontend checks
+
+Run the backend API tests from the project root:
 
 ```powershell
-$env:PYTHONPATH="."
+$env:PYTHONPATH = "."
 & ".\backend\.venv\Scripts\pytest.exe" backend\tests -v
 ```
 
-All 8 tests validate:
-1. Database connectivity and health endpoint.
-2. Vehicle fleet listing and category verification.
-3. Customer registration and duplicate constraint conflicts.
-4. Validation of invalid dates (`return_at <= pickup_at`).
-5. Enforcing driving licence verification before a reservation is confirmed.
-6. Overlapping reservation conflict detection via PostgreSQL exclusion constraint (409 Conflict).
-7. Full reservation lifecycle (Booking &rarr; Payment &rarr; Handover &rarr; Return check-in &rarr; Vehicle restoration &rarr; Trigger audit log).
-8. Dashboard and analytical reports endpoints.
+Run frontend checks from the `frontend` directory:
+
+```powershell
+npm run lint
+npm run build
+```
+
+The API tests exercise database-backed workflows, so configure `.env` and make the existing database available before running them. Review test behavior before using it against data that must remain unchanged.
+
+## Related documentation
+
+- [`sql/01_existing_schema_documentation.sql`](./sql/01_existing_schema_documentation.sql) — existing schema reference.
+- [`sql/02_additional_views.sql`](./sql/02_additional_views.sql) — supplementary reporting-view definitions.

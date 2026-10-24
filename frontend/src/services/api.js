@@ -66,6 +66,7 @@ export const api = {
   getVehicle: (id) => request(`/vehicles/${id}`),
   createVehicle: (data) => request('/vehicles', { method: 'POST', body: JSON.stringify(data) }),
   updateVehicle: (id, data) => request(`/vehicles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteVehicle: (id) => request(`/vehicles/${id}`, { method: 'DELETE' }),
   updateVehicleStatus: (id, status) => request(`/vehicles/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
   // Customers
@@ -78,6 +79,8 @@ export const api = {
   },
   getCustomer: (id) => request(`/customers/${id}`),
   registerCustomer: (data) => request('/customers', { method: 'POST', body: JSON.stringify(data) }),
+  updateCustomer: (id, data) => request(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteCustomer: (id) => request(`/customers/${id}`, { method: 'DELETE' }),
   verifyCustomer: (id, licence_verified) =>
     request(`/customers/${id}/verify`, { method: 'PATCH', body: JSON.stringify({ licence_verified }) }),
 

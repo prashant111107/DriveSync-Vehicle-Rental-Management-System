@@ -8,7 +8,8 @@ import {
   Mail,
   Phone,
   FileText,
-  Calendar,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
@@ -27,6 +28,7 @@ export const Customers = ({ refreshKey, isAddModalOpen, setIsAddModalOpen }) => 
     phone: '',
     licence_number: '',
   });
+  const [editCustomer, setEditCustomer] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchCustomers = async () => {
@@ -83,6 +85,38 @@ export const Customers = ({ refreshKey, isAddModalOpen, setIsAddModalOpen }) => 
         `Driving licence for ${customer.full_name} ${nextState ? 'VERIFIED' : 'UNVERIFIED'}.`,
         nextState ? 'success' : 'info'
       );
+      fetchCustomers();
+    } catch (err) {
+      addToast(err.message, 'error');
+    }
+  };
+
+  const handleUpdateCustomer = async (e) => {
+    e.preventDefault();
+    if (!editCustomer) return;
+    try {
+      setSubmitting(true);
+      await api.updateCustomer(editCustomer.customer_id, {
+        full_name: editCustomer.full_name,
+        email: editCustomer.email,
+        phone: editCustomer.phone,
+        licence_number: editCustomer.licence_number,
+      });
+      addToast('Customer profile updated successfully.', 'success');
+      setEditCustomer(null);
+      fetchCustomers();
+    } catch (err) {
+      addToast(err.message, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteCustomer = async (customer) => {
+    if (!window.confirm(`Delete customer ${customer.full_name}? Customers with booking history cannot be deleted.`)) return;
+    try {
+      await api.deleteCustomer(customer.customer_id);
+      addToast('Customer deleted successfully.', 'success');
       fetchCustomers();
     } catch (err) {
       addToast(err.message, 'error');
@@ -188,12 +222,27 @@ export const Customers = ({ refreshKey, isAddModalOpen, setIsAddModalOpen }) => 
                     </div>
                   </td>
                   <td>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setEditCustomer({ ...c })}
+                        className="btn btn-secondary btn-sm"
+                        aria-label={`Edit ${c.full_name}`}
+                      >
+                        <Edit2 size={13} />
+                        <span>Edit</span>
+                      </button>
                       <button
                         onClick={() => handleToggleVerification(c)}
                         className={`btn btn-sm ${c.licence_verified ? 'btn-secondary' : 'btn-success'}`}
                       >
                         {c.licence_verified ? 'Revoke Verification' : 'Verify Licence'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCustomer(c)}
+                        className="btn btn-danger btn-sm"
+                        aria-label={`Delete ${c.full_name}`}
+                      >
+                        <Trash2 size={13} />
                       </button>
                     </div>
                   </td>
@@ -279,6 +328,65 @@ export const Customers = ({ refreshKey, isAddModalOpen, setIsAddModalOpen }) => 
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(editCustomer)}
+        onClose={() => setEditCustomer(null)}
+        title="Edit Customer Profile"
+      >
+        {editCustomer && (
+          <form onSubmit={handleUpdateCustomer}>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Full Name *</label>
+                <input
+                  className="form-control"
+                  value={editCustomer.full_name}
+                  onChange={(e) => setEditCustomer({ ...editCustomer, full_name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Email Address *</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  value={editCustomer.email}
+                  onChange={(e) => setEditCustomer({ ...editCustomer, email: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Phone Number *</label>
+                <input
+                  type="tel"
+                  className="form-control"
+                  value={editCustomer.phone}
+                  onChange={(e) => setEditCustomer({ ...editCustomer, phone: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Driving Licence Number *</label>
+                <input
+                  className="form-control"
+                  value={editCustomer.licence_number}
+                  onChange={(e) => setEditCustomer({ ...editCustomer, licence_number: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" onClick={() => setEditCustomer(null)} className="btn btn-secondary">
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting} className="btn btn-primary">
+                {submitting ? <span className="spinner" /> : <span>Save Changes</span>}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   );

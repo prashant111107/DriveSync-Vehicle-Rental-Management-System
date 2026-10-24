@@ -40,11 +40,34 @@ def record_payment(payload: PaymentCreate, conn: psycopg.Connection = Depends(ge
     try:
         with conn.transaction():
             with conn.cursor() as cur:
-                # Check booking exists
-                cur.execute("SELECT booking_id, status FROM bookings WHERE booking_id = %s FOR SHARE;", (payload.booking_id,))
+                # Serialize ledger updates for a booking so concurrent refunds cannot exceed captures.
+                cur.execute("SELECT booking_id, status FROM bookings WHERE booking_id = %s FOR UPDATE;", (payload.booking_id,))
                 booking = cur.fetchone()
                 if not booking:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Booking {payload.booking_id} not found")
+
+                if payload.payment_type == "REFUND" and payload.status in ("SUCCESS", "PENDING"):
+                    cur.execute(
+                        """
+                        SELECT
+                            COALESCE(SUM(amount) FILTER (
+                                WHERE status = 'SUCCESS' AND payment_type <> 'REFUND'
+                            ), 0) AS captured,
+                            COALESCE(SUM(amount) FILTER (
+                                WHERE payment_type = 'REFUND' AND status IN ('SUCCESS', 'PENDING')
+                            ), 0) AS reserved_refunds
+                        FROM payments
+                        WHERE booking_id = %s;
+                        """,
+                        (payload.booking_id,),
+                    )
+                    ledger = cur.fetchone()
+                    refundable = ledger["captured"] - ledger["reserved_refunds"]
+                    if payload.amount > refundable:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"Refund exceeds the unrefunded captured amount ({refundable}).",
+                        )
 
                 ref = payload.transaction_reference
                 if not ref or not ref.strip():

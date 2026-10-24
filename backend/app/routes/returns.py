@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -61,10 +61,10 @@ def record_vehicle_return(payload: ReturnCreate, conn: psycopg.Connection = Depe
                 if not booking:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Booking {payload.booking_id} not found")
 
-                if booking["status"] not in ("ACTIVE", "CONFIRMED"):
+                if booking["status"] != "ACTIVE":
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Cannot record return for booking in status '{booking['status']}'. Booking must be ACTIVE or CONFIRMED.",
+                        detail=f"Cannot record return for booking in status '{booking['status']}'. The vehicle must be handed over before it can be returned.",
                     )
 
                 # Check if return already recorded
@@ -76,7 +76,17 @@ def record_vehicle_return(payload: ReturnCreate, conn: psycopg.Connection = Depe
                     )
 
                 # 2. Insert into rental_returns
-                actual_at = payload.actual_return_at or datetime.now()
+                actual_at = payload.actual_return_at or datetime.now(timezone.utc)
+                if actual_at.tzinfo is None or actual_at.utcoffset() is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Actual return time must include a timezone.",
+                    )
+                if actual_at < booking["pickup_at"] or actual_at > datetime.now(timezone.utc):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Actual return time must be between the scheduled pickup and the current time.",
+                    )
                 insert_query = """
                     INSERT INTO rental_returns (
                         booking_id, actual_return_at, odometer_start, odometer_end,
@@ -109,10 +119,16 @@ def record_vehicle_return(payload: ReturnCreate, conn: psycopg.Connection = Depe
 
                 # 4. Set vehicle back to AVAILABLE
                 cur.execute("""
-                    UPDATE vehicles 
-                    SET status = 'AVAILABLE' 
+                    UPDATE vehicles
+                    SET status = CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM maintenance_records
+                            WHERE vehicle_id = %s AND status = 'IN_PROGRESS'
+                        ) THEN 'MAINTENANCE'
+                        ELSE 'AVAILABLE'
+                    END
                     WHERE vehicle_id = %s;
-                """, (booking["vehicle_id"],))
+                """, (booking["vehicle_id"], booking["vehicle_id"]))
 
                 # Update history note if fees exist
                 fee_summary = []

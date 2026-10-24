@@ -24,7 +24,6 @@ export const ReturnsPayments = ({
   const [activeSubTab, setActiveSubTab] = useState('returns');
   const [returnsList, setReturnsList] = useState([]);
   const [paymentsList, setPaymentsList] = useState([]);
-  const [activeBookings, setActiveBookings] = useState([]);
   const [allBookings, setAllBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const { addToast } = useToast();
@@ -64,7 +63,6 @@ export const ReturnsPayments = ({
       ]);
       setReturnsList(rData);
       setPaymentsList(pData);
-      setActiveBookings(activeB);
       setAllBookings(allB);
 
       if (activeB.length > 0 && !returnForm.booking_id) {
@@ -122,7 +120,7 @@ export const ReturnsPayments = ({
         damage_fee: parseFloat(returnForm.damage_fee || 0),
       });
 
-      addToast(`Return processed! Booking #${returnForm.booking_id} completed and vehicle restored to AVAILABLE.`, 'success');
+      addToast(`Return processed! Booking #${returnForm.booking_id} completed and vehicle availability updated.`, 'success');
       setIsReturnModalOpen(false);
       setPreselectedBookingForReturn(null);
       fetchData();
@@ -375,7 +373,7 @@ export const ReturnsPayments = ({
         <form onSubmit={handleProcessReturn}>
           <div className="modal-body">
             <div className="form-group">
-              <label className="form-label">Active / Confirmed Booking *</label>
+              <label className="form-label">Active Booking *</label>
               <select
                 className="form-control"
                 value={returnForm.booking_id}
@@ -384,7 +382,7 @@ export const ReturnsPayments = ({
               >
                 <option value="">Select booking...</option>
                 {allBookings
-                  .filter((b) => b.status === 'ACTIVE' || b.status === 'CONFIRMED')
+                  .filter((b) => b.status === 'ACTIVE')
                   .map((b) => (
                     <option key={b.booking_id} value={b.booking_id}>
                       #{b.booking_id} - {b.customer_name} ({b.brand} {b.model}) [{b.status}]

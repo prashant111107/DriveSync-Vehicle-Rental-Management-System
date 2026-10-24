@@ -1,5 +1,4 @@
 from typing import Optional, List
-from datetime import datetime
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -47,6 +46,22 @@ def create_maintenance(payload: MaintenanceCreate, conn: psycopg.Connection = De
                 veh = cur.fetchone()
                 if not veh:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Vehicle {payload.vehicle_id} not found")
+
+                if payload.status == "IN_PROGRESS":
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM bookings
+                            WHERE vehicle_id = %s AND status = 'ACTIVE'
+                        ) AS rented;
+                        """,
+                        (payload.vehicle_id,),
+                    )
+                    if cur.fetchone()["rented"]:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="An active rental prevents maintenance from starting.",
+                        )
 
                 insert_query = """
                     INSERT INTO maintenance_records (vehicle_id, description, start_at, end_at, cost, status)
@@ -116,9 +131,47 @@ def update_maintenance(
 
                 # Status transition side effects on vehicle
                 target_status = data.get("status")
-                if target_status == "COMPLETED":
-                    cur.execute("UPDATE vehicles SET status = 'AVAILABLE' WHERE vehicle_id = %s;", (current["vehicle_id"],))
+                if target_status in ("COMPLETED", "SCHEDULED"):
+                    cur.execute(
+                        """
+                        UPDATE vehicles
+                        SET status = CASE
+                            WHEN EXISTS (
+                                SELECT 1 FROM maintenance_records
+                                WHERE vehicle_id = %s AND maintenance_id <> %s
+                                  AND status = 'IN_PROGRESS'
+                            ) THEN 'MAINTENANCE'
+                            WHEN EXISTS (
+                                SELECT 1 FROM bookings
+                                WHERE vehicle_id = %s AND status = 'ACTIVE'
+                            ) THEN status
+                            WHEN status = 'INACTIVE' THEN status
+                            ELSE 'AVAILABLE'
+                        END
+                        WHERE vehicle_id = %s;
+                        """,
+                        (
+                            current["vehicle_id"],
+                            maintenance_id,
+                            current["vehicle_id"],
+                            current["vehicle_id"],
+                        ),
+                    )
                 elif target_status == "IN_PROGRESS":
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM bookings
+                            WHERE vehicle_id = %s AND status = 'ACTIVE'
+                        ) AS rented;
+                        """,
+                        (current["vehicle_id"],),
+                    )
+                    if cur.fetchone()["rented"]:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="An active rental prevents maintenance from starting.",
+                        )
                     cur.execute("UPDATE vehicles SET status = 'MAINTENANCE' WHERE vehicle_id = %s;", (current["vehicle_id"],))
 
                 updated["brand"] = current["brand"]

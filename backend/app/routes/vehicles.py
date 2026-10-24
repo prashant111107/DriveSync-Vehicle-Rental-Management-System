@@ -14,11 +14,45 @@ from ..schemas import (
 
 router = APIRouter(prefix="/api/v1/vehicles", tags=["Vehicles"])
 
-@router.get("/categories", response_model=List[CategoryResponse])
-def get_categories(conn: psycopg.Connection = Depends(get_db)):
-    with conn.cursor() as cur:
-        cur.execute("SELECT category_id, category_name, description FROM vehicle_categories ORDER BY category_id;")
-        return cur.fetchall()
+def validate_vehicle_status_change(cur, vehicle_id, current_status, new_status):
+    if new_status == current_status:
+        return
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM bookings
+            WHERE vehicle_id = %s AND status = 'ACTIVE'
+        ) AS rented,
+        EXISTS (
+            SELECT 1 FROM maintenance_records
+            WHERE vehicle_id = %s AND status = 'IN_PROGRESS'
+        ) AS in_maintenance;
+        """,
+        (vehicle_id, vehicle_id),
+    )
+    operational_state = cur.fetchone()
+    if operational_state["rented"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An active rental prevents changing this vehicle's operational status.",
+        )
+    if operational_state["in_maintenance"] and new_status != "MAINTENANCE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A vehicle with in-progress maintenance must remain in maintenance status.",
+        )
+
+
+@router.get("/categories")
+def get_categories(db: psycopg.Connection = Depends(get_db)):
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT category_id, category_name FROM categories ORDER BY category_name;")
+            categories = cur.fetchall()
+            return categories
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("", response_model=List[VehicleResponse])
 def list_vehicles(
@@ -116,106 +150,162 @@ def get_vehicle(vehicle_id: int, conn: psycopg.Connection = Depends(get_db)):
 @router.post("", response_model=VehicleResponse, status_code=status.HTTP_201_CREATED)
 def create_vehicle(payload: VehicleCreate, conn: psycopg.Connection = Depends(get_db)):
     try:
-        with conn.cursor() as cur:
-            # Check category exists
-            cur.execute("SELECT category_name FROM vehicle_categories WHERE category_id = %s;", (payload.category_id,))
-            cat = cur.fetchone()
-            if not cat:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("SELECT category_name FROM categories WHERE category_id = %s;", (payload.category_id,))
+                cat = cur.fetchone()
+                if not cat:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
-            insert_query = """
-                INSERT INTO vehicles (
-                    category_id, registration_no, brand, model, manufacture_year,
-                    fuel_type, transmission, seating_capacity, daily_rate, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING vehicle_id, category_id, registration_no, brand, model,
-                          manufacture_year, fuel_type, transmission, seating_capacity,
-                          daily_rate, status;
-            """
-            cur.execute(
-                insert_query,
-                (
-                    payload.category_id,
-                    payload.registration_no.strip().upper(),
-                    payload.brand.strip(),
-                    payload.model.strip(),
-                    payload.manufacture_year,
-                    payload.fuel_type,
-                    payload.transmission,
-                    payload.seating_capacity,
-                    payload.daily_rate,
-                    payload.status,
-                ),
-            )
-            created = cur.fetchone()
-            created["category_name"] = cat["category_name"]
-            conn.commit()
-            return created
-    except psycopg.errors.UniqueViolation:
-        conn.rollback()
+                cur.execute(
+                    """
+                    INSERT INTO vehicles (
+                        category_id, registration_no, brand, model, manufacture_year,
+                        fuel_type, transmission, seating_capacity, daily_rate, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING vehicle_id, category_id, registration_no, brand, model,
+                              manufacture_year, fuel_type, transmission, seating_capacity,
+                              daily_rate, status;
+                    """,
+                    (
+                        payload.category_id,
+                        payload.registration_no.strip().upper(),
+                        payload.brand.strip(),
+                        payload.model.strip(),
+                        payload.manufacture_year,
+                        payload.fuel_type,
+                        payload.transmission,
+                        payload.seating_capacity,
+                        payload.daily_rate,
+                        payload.status,
+                    ),
+                )
+                created = cur.fetchone()
+                created["category_name"] = cat["category_name"]
+                return created
+    except psycopg.errors.UniqueViolation as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A vehicle with registration number '{payload.registration_no}' already exists.",
-        )
+        ) from e
     except psycopg.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        # This will now show the exact PostgreSQL error in your frontend toast and backend terminal!
+        print(f"Database Error: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Database error: {e}") from e
 
+    
 @router.put("/{vehicle_id}", response_model=VehicleResponse)
 def update_vehicle(vehicle_id: int, payload: VehicleUpdate, conn: psycopg.Connection = Depends(get_db)):
-    with conn.cursor() as cur:
-        cur.execute("SELECT * FROM vehicles WHERE vehicle_id = %s;", (vehicle_id,))
-        existing = cur.fetchone()
-        if not existing:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Vehicle {vehicle_id} not found")
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return get_vehicle(vehicle_id, conn)
+    if any(value is None for field, value in data.items() if field != "manufacture_year"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Update fields cannot be null.")
+    try:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT vehicle_id, status FROM vehicles WHERE vehicle_id = %s FOR UPDATE;",
+                    (vehicle_id,),
+                )
+                current = cur.fetchone()
+                if not current:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Vehicle {vehicle_id} not found")
 
-        updates = []
-        params = []
-        data = payload.model_dump(exclude_unset=True)
-
-        for k, v in data.items():
-            updates.append(f"{k} = %s")
-            params.append(v)
-
-        if not updates:
-            # Nothing to update, return existing
-            cur.execute("""
-                SELECT v.*, vc.category_name 
-                FROM vehicles v JOIN vehicle_categories vc ON v.category_id = vc.category_id
-                WHERE v.vehicle_id = %s;
-            """, (vehicle_id,))
-            return cur.fetchone()
-
-        params.append(vehicle_id)
-        update_query = f"UPDATE vehicles SET {', '.join(updates)} WHERE vehicle_id = %s RETURNING *;"
-        try:
-            cur.execute(update_query, tuple(params))
-            updated = cur.fetchone()
-            cur.execute("SELECT category_name FROM vehicle_categories WHERE category_id = %s;", (updated["category_id"],))
-            cat = cur.fetchone()
-            updated["category_name"] = cat["category_name"] if cat else None
-            conn.commit()
-            return updated
-        except psycopg.Error as e:
-            conn.rollback()
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+                if "status" in data:
+                    validate_vehicle_status_change(cur, vehicle_id, current["status"], data["status"])
+                if "registration_no" in data:
+                    data["registration_no"] = data["registration_no"].strip().upper()
+                if "brand" in data:
+                    data["brand"] = data["brand"].strip()
+                if "model" in data:
+                    data["model"] = data["model"].strip()
+                updates = [f"{field} = %s" for field in data]
+                values = [data[field] for field in data]
+                values.append(vehicle_id)
+                cur.execute(
+                    f"""
+                        UPDATE vehicles
+                        SET {', '.join(updates)}
+                        WHERE vehicle_id = %s
+                        RETURNING vehicle_id, category_id, registration_no, brand, model,
+                                  manufacture_year, fuel_type, transmission, seating_capacity,
+                                  daily_rate, status;
+                    """,
+                    tuple(values),
+                )
+                updated = cur.fetchone()
+                cur.execute(
+                    "SELECT category_name FROM vehicle_categories WHERE category_id = %s;",
+                    (updated["category_id"],),
+                )
+                updated["category_name"] = cur.fetchone()["category_name"]
+                return updated
+    except psycopg.errors.UniqueViolation as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A vehicle with this registration number already exists.",
+        ) from e
+    except psycopg.Error as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to update vehicle.") from e
 
 @router.patch("/{vehicle_id}/status", response_model=VehicleResponse)
 def update_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate, conn: psycopg.Connection = Depends(get_db)):
-    with conn.cursor() as cur:
-        cur.execute("""
-            UPDATE vehicles 
-            SET status = %s 
-            WHERE vehicle_id = %s 
-            RETURNING *;
-        """, (payload.status, vehicle_id))
-        updated = cur.fetchone()
-        if not updated:
-            conn.rollback()
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Vehicle {vehicle_id} not found")
-        
-        cur.execute("SELECT category_name FROM vehicle_categories WHERE category_id = %s;", (updated["category_id"],))
-        cat = cur.fetchone()
-        updated["category_name"] = cat["category_name"] if cat else None
-        conn.commit()
-        return updated
+    try:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT vehicle_id, category_id, status
+                    FROM vehicles
+                    WHERE vehicle_id = %s
+                    FOR UPDATE;
+                    """,
+                    (vehicle_id,),
+                )
+                vehicle = cur.fetchone()
+                if not vehicle:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Vehicle {vehicle_id} not found")
+
+                validate_vehicle_status_change(cur, vehicle_id, vehicle["status"], payload.status)
+
+                cur.execute(
+                    """
+                    UPDATE vehicles
+                    SET status = %s
+                    WHERE vehicle_id = %s
+                    RETURNING vehicle_id, category_id, registration_no, brand, model,
+                              manufacture_year, fuel_type, transmission, seating_capacity,
+                              daily_rate, status;
+                    """,
+                    (payload.status, vehicle_id),
+                )
+                updated = cur.fetchone()
+                cur.execute(
+                    "SELECT category_name FROM vehicle_categories WHERE category_id = %s;",
+                    (updated["category_id"],),
+                )
+                updated["category_name"] = cur.fetchone()["category_name"]
+                return updated
+    except psycopg.Error as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to update vehicle status.") from e
+
+@router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_vehicle(vehicle_id: int, conn: psycopg.Connection = Depends(get_db)):
+    try:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM vehicles WHERE vehicle_id = %s RETURNING vehicle_id;",
+                    (vehicle_id,),
+                )
+                if not cur.fetchone():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Vehicle {vehicle_id} not found.",
+                    )
+    except psycopg.errors.ForeignKeyViolation as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This vehicle has booking or maintenance history and cannot be deleted.",
+        ) from e

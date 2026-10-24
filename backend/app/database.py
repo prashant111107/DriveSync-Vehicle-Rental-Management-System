@@ -7,10 +7,11 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 
-# Load environment variables explicitly
 load_dotenv()
 
 logger = logging.getLogger("vehicle_rental.database")
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 pool: ConnectionPool | None = None
 
@@ -19,17 +20,13 @@ def init_db_pool() -> ConnectionPool:
     if pool is None:
         logger.info("Initializing PostgreSQL connection pool...")
         
-        # Directly grab DATABASE_URL or fall back safely
-        conninfo = os.getenv("DATABASE_URL")
-        
-        if not conninfo:
-            raise ValueError("DATABASE_URL is missing from environment variables or .env file!")
-
         pool = ConnectionPool(
-            conninfo=conninfo,
+            conninfo=DATABASE_URL,
             min_size=2,
             max_size=15,
-            kwargs={"row_factory": dict_row},
+            kwargs={
+                "row_factory": dict_row,
+            },
             open=True,
         )
     return pool
