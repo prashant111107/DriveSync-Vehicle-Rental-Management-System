@@ -1,0 +1,119 @@
+-- ==============================================================================
+-- Vehicle Rental Management System
+-- Database Schema Documentation & Reference
+-- Existing Database: vehicle_rental_db (PostgreSQL 18.6)
+-- ==============================================================================
+
+-- 1. VEHICLE CATEGORIES
+-- Stores car/vehicle segment classification (e.g. Hatchback, SUV, Bike)
+-- Table: vehicle_categories
+-- Columns:
+--   category_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   category_name: VARCHAR NOT NULL UNIQUE
+--   description: TEXT NULL
+
+-- 2. VEHICLES
+-- Stores fleet inventory with rental rates, specifications, and availability status
+-- Table: vehicles
+-- Columns:
+--   vehicle_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   category_id: INT NOT NULL REFERENCES vehicle_categories(category_id) ON DELETE RESTRICT
+--   registration_no: VARCHAR NOT NULL UNIQUE
+--   brand: VARCHAR NOT NULL
+--   model: VARCHAR NOT NULL
+--   manufacture_year: INT CHECK (manufacture_year BETWEEN 1900 AND 2100)
+--   fuel_type: VARCHAR NOT NULL CHECK (fuel_type IN ('PETROL', 'DIESEL', 'ELECTRIC', 'HYBRID', 'CNG'))
+--   transmission: VARCHAR NOT NULL CHECK (transmission IN ('MANUAL', 'AUTOMATIC'))
+--   seating_capacity: INT NOT NULL CHECK (seating_capacity > 0)
+--   daily_rate: NUMERIC NOT NULL CHECK (daily_rate > 0)
+--   status: VARCHAR NOT NULL DEFAULT 'AVAILABLE' CHECK (status IN ('AVAILABLE', 'MAINTENANCE', 'INACTIVE'))
+
+-- 3. CUSTOMERS
+-- Stores customer profiles with contact info and driving licence verification
+-- Table: customers
+-- Columns:
+--   customer_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   full_name: VARCHAR NOT NULL
+--   email: VARCHAR NOT NULL UNIQUE
+--   phone: VARCHAR NOT NULL UNIQUE
+--   licence_number: VARCHAR NOT NULL UNIQUE
+--   licence_verified: BOOLEAN NOT NULL DEFAULT FALSE
+--   created_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+-- 4. BOOKINGS
+-- Stores rental reservations with pickup/return intervals and total amounts
+-- Table: bookings
+-- Columns:
+--   booking_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   customer_id: INT NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT
+--   vehicle_id: INT NOT NULL REFERENCES vehicles(vehicle_id) ON DELETE RESTRICT
+--   pickup_at: TIMESTAMPTZ NOT NULL
+--   return_at: TIMESTAMPTZ NOT NULL CHECK (return_at > pickup_at)
+--   daily_rate_at_booking: NUMERIC NOT NULL CHECK (daily_rate_at_booking > 0)
+--   total_amount: NUMERIC NOT NULL CHECK (total_amount >= 0)
+--   status: VARCHAR NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'CANCELLED'))
+--   created_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- Constraints:
+--   EXCLUSION CONSTRAINT bookings_no_overlapping_active_reservations:
+--     EXCLUDE USING gist (vehicle_id WITH =, tstzrange(pickup_at, return_at, '[)') WITH &&)
+--     WHERE (status IN ('PENDING', 'CONFIRMED', 'ACTIVE'))
+-- Triggers:
+--   trg_booking_status_history:
+--     AFTER UPDATE OF status ON bookings FOR EACH ROW EXECUTE FUNCTION log_booking_status_change()
+
+-- 5. BOOKING STATUS HISTORY
+-- Audit log of booking status transitions triggered by PostgreSQL function log_booking_status_change()
+-- Table: booking_status_history
+-- Columns:
+--   history_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   booking_id: INT NOT NULL REFERENCES bookings(booking_id) ON DELETE RESTRICT
+--   old_status: VARCHAR NULL
+--   new_status: VARCHAR NOT NULL
+--   changed_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+--   note: TEXT NULL
+
+-- 6. PAYMENTS
+-- Financial transactions linked to bookings
+-- Table: payments
+-- Columns:
+--   payment_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   booking_id: INT NOT NULL REFERENCES bookings(booking_id) ON DELETE RESTRICT
+--   amount: NUMERIC NOT NULL CHECK (amount > 0)
+--   payment_type: VARCHAR NOT NULL CHECK (payment_type IN ('RENTAL', 'DEPOSIT', 'LATE_FEE', 'DAMAGE', 'REFUND'))
+--   payment_method: VARCHAR NOT NULL CHECK (payment_method IN ('CASH', 'UPI', 'CARD', 'BANK_TRANSFER'))
+--   status: VARCHAR NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED'))
+--   transaction_reference: VARCHAR UNIQUE NULL
+--   payment_date: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+-- 7. RENTAL RETURNS
+-- Check-in inspections upon vehicle return
+-- Table: rental_returns
+-- Columns:
+--   return_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   booking_id: INT NOT NULL UNIQUE REFERENCES bookings(booking_id) ON DELETE RESTRICT
+--   actual_return_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+--   odometer_start: INT NOT NULL CHECK (odometer_start >= 0)
+--   odometer_end: INT NOT NULL CHECK (odometer_end >= odometer_start)
+--   fuel_level: VARCHAR CHECK (fuel_level IN ('EMPTY', 'LOW', 'HALF', 'HIGH', 'FULL'))
+--   damage_notes: TEXT NULL
+--   late_fee: NUMERIC NOT NULL DEFAULT 0 CHECK (late_fee >= 0)
+--   damage_fee: NUMERIC NOT NULL DEFAULT 0 CHECK (damage_fee >= 0)
+
+-- 8. MAINTENANCE RECORDS
+-- Vehicle service and maintenance tracking
+-- Table: maintenance_records
+-- Columns:
+--   maintenance_id: INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+--   vehicle_id: INT NOT NULL REFERENCES vehicles(vehicle_id) ON DELETE RESTRICT
+--   description: TEXT NOT NULL
+--   start_at: TIMESTAMPTZ NOT NULL
+--   end_at: TIMESTAMPTZ NULL CHECK (end_at IS NULL OR end_at >= start_at)
+--   cost: NUMERIC NOT NULL DEFAULT 0 CHECK (cost >= 0)
+--   status: VARCHAR NOT NULL DEFAULT 'SCHEDULED' CHECK (status IN ('SCHEDULED', 'IN_PROGRESS', 'COMPLETED'))
+
+-- EXISTING VIEWS:
+-- 1. available_vehicles
+--    SELECT vehicle_id, registration_no, brand, model, daily_rate FROM vehicles WHERE status = 'AVAILABLE';
+-- 2. booking_details
+--    SELECT b.booking_id, c.full_name, v.brand, v.model, b.pickup_at, b.return_at, b.total_amount, b.status
+--    FROM bookings b JOIN customers c ON b.customer_id = c.customer_id JOIN vehicles v ON b.vehicle_id = v.vehicle_id;
