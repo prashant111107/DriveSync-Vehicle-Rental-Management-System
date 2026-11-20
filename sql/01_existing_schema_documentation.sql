@@ -38,7 +38,7 @@
 --   phone: VARCHAR NOT NULL UNIQUE
 --   licence_number: VARCHAR NOT NULL UNIQUE
 --   licence_verified: BOOLEAN NOT NULL DEFAULT FALSE
---   created_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+--   created_at: TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAM
 
 -- 4. BOOKINGS
 -- Stores rental reservations with pickup/return intervals and total amounts
